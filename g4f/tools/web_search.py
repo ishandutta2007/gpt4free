@@ -89,10 +89,10 @@ def scrape_text(html: str, max_words: int = None, add_source=True, count_images:
         if select:
             select.extract()
 
-    image_select = "img[alt][src^=http]:not([alt=''])"
+    image_select = "img[alt][src^=http]:not([alt='']):not(.avatar):not([width])"
     image_link_select = f"a:has({image_select})"
     yield_words = []
-    for paragraph in soup.select(f"h1, h2, h3, h4, h5, h6, p, table:not(:has(p)), ul:not(:has(p)), {image_link_select}"):
+    for paragraph in soup.select(f"h1, h2, h3, h4, h5, h6, p, pre, table:not(:has(p)), ul:not(:has(p)), {image_link_select}"):
         if count_images > 0:
             image = paragraph.select_one(image_select)
             if image:
@@ -237,7 +237,7 @@ def get_search_message(prompt: str, raise_search_exceptions=False, **kwargs) -> 
     except (DuckDuckGoSearchException, MissingRequirementsError) as e:
         if raise_search_exceptions:
             raise e
-        debug.log(f"Couldn't do web search: {e.__class__.__name__}: {e}")
+        debug.error(f"Couldn't do web search: {e.__class__.__name__}: {e}")
         return prompt
 
 def spacy_get_keywords(text: str):

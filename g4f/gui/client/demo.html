@@ -181,13 +181,11 @@
     <script>
         (async () => {
             const isIframe = window.self !== window.top;
+            const backendUrl = "{{backend_url}}";
             let url = new URL(window.location.href)
-            let params = new URLSearchParams(url.search);
-            if (params.get("__sign")) {
-                localStorage.setItem("zerogpu_token", params.get("__sign"));
-                if (!isIframe) {
-                    window.location.replace("/");
-                }
+            if (isIframe && backendUrl) {
+                window.location.replace(`${backendUrl}${url.search}`);
+                return;
             }
         })();
     </script>
@@ -221,23 +219,26 @@
         <form action="/chat/">
             <input type="text" name="token" class="input-field" placeholder="Enter an Access Token..." autocomplete="off">
             <div class="button-container">
-                <a href="" class="button hidden" target="_blank">New Window</a>
+                <a id="new_window" href="" class="button hidden" target="_blank">New Window</a>
                 <button class="button">Submit</button>
             </div>
             <p>
                 <a href="https://huggingface.co/settings/tokens" target="_blank">Get Access Token</a>
             </p>
+            <img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/sign-in-with-huggingface-xl-dark.svg" alt="Sign in with Hugging Face" style="cursor: pointer; display: none;" id="signin">
+            <button id="signout" style="display: none">Sign out</button>
         </form>
         <script type="module">
             import * as hub from "@huggingface/hub";
             import { init } from "@huggingface/space-header";
+            import { oauthLoginUrl, oauthHandleRedirectIfPresent } from "@huggingface/hub";
 
             const isIframe = window.self !== window.top;
             const button = document.querySelector('form a.button');
             if (isIframe) {
                 button.classList.remove('hidden');
             } else {
-                init("roxky/g4f-space");
+                init("roxky/g4f-space-new");
             }
 
             const form = document.querySelector("form");
@@ -256,7 +257,6 @@
                     return;
                 }
                 localStorage.setItem("HuggingFace-api_key", accessToken);
-                localStorage.setItem("HuggingFace-user", JSON.stringify(user));
                 localStorage.setItem("user", user.name);
                 localStorage.setItem("report_error", "true")
                 location.href = "/chat/";
@@ -267,6 +267,34 @@
                 event.preventDefault();
                 check_access_token();
             });
+
+            let oauthResult = localStorage.getItem("oauth");
+            if (oauthResult) {
+                try {
+                    oauthResult = JSON.parse(oauthResult);
+                } catch {
+                    oauthResult = null;
+                }
+            }
+            oauthResult ||= await oauthHandleRedirectIfPresent();
+            if (oauthResult) {
+                localStorage.setItem("oauth", JSON.stringify(oauthResult));
+                localStorage.setItem("HuggingFace-api_key", oauthResult.accessToken);
+                localStorage.setItem("user", oauthResult.userInfo.fullname);
+                document.getElementById("signout").style.removeProperty("display");
+                document.getElementById("signout").onclick = async function() {
+                    localStorage.removeItem("oauth");
+                    localStorage.removeItem("HuggingFace-api_key");
+                    window.location.href = window.location.href.replace(/\?.*$/, '');
+                    window.location.reload();
+                }
+            } else {
+                document.getElementById("signin").style.removeProperty("display");
+                document.getElementById("signin").onclick = async function() {
+                    // prompt=consent to re-trigger the consent screen instead of silently redirecting
+                    window.location.href = (await oauthLoginUrl({clientId: 'ed074164-4f8d-4fb2-8bec-44952707965e', scopes: ['inference-api']})) + "&prompt=consent";
+                }
+            }
         </script>
 
         <!-- Footer -->
@@ -282,13 +310,11 @@
             const cache_id = Math.floor(Math.random() * max);
             let prompt;
             if (cache_id % 2 == 0) {
-                prompt = `
-                Today is ${new Date().toJSON().slice(0, 10)}.
+                prompt = `Today is ${new Date().toJSON().slice(0, 10)}.
                 Create a single-page HTML screensaver reflecting the current season (based on the date).
                 Avoid using any text.`;
             } else {
                 prompt = `Create a single-page HTML screensaver. Avoid using any text.`;
-                const response = await fetch(`/backend-api/v2/create?prompt=${prompt}&filter_markdown=html&cache=${cache_id}`);
             }
             const response = await fetch(`/backend-api/v2/create?prompt=${prompt}&filter_markdown=html&cache=${cache_id}`);
             const text = await response.text()

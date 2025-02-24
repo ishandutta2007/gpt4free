@@ -23,6 +23,7 @@ const album             = document.querySelector(".images");
 const log_storage       = document.querySelector(".log");
 const switchInput       = document.getElementById("switch");
 const searchButton      = document.getElementById("search");
+const paperclip         = document.querySelector(".user-input .fa-paperclip");
 
 const optionElementsSelector = ".settings input, .settings textarea, #model, #model2, #provider";
 
@@ -38,7 +39,10 @@ let finish_storage = {};
 let usage_storage = {};
 let reasoning_storage = {};
 let generate_storage = {};
+let title_ids_storage = {};
 let is_demo = false;
+let wakeLock = null;
+let countTokensEnabled = true;
 
 messageInput.addEventListener("blur", () => {
     document.documentElement.scrollTop = 0;
@@ -57,7 +61,7 @@ appStorage = window.localStorage || {
 
 appStorage.getItem("darkMode") == "false" ? document.body.classList.add("white") : null;
 
-let markdown_render = () => null;
+let markdown_render = (content) => escapeHtml(content);
 if (window.markdownit) {
     const markdown = window.markdownit();
     markdown_render = (content) => {
@@ -71,6 +75,8 @@ if (window.markdownit) {
         )
             .replaceAll("<a href=", '<a target="_blank" href=')
             .replaceAll('<code>', '<code class="language-plaintext">')
+            .replaceAll('&lt;i class=&quot;', '<i class="')
+            .replaceAll('&quot;&gt;&lt;/i&gt;', '"></i>')
     }
 }
 
@@ -248,176 +254,130 @@ function register_message_images() {
 
 const register_message_buttons = async () => {
     message_box.querySelectorAll(".message .content .provider").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            const provider_forms = document.querySelector(".provider_forms");
-            const provider_form = provider_forms.querySelector(`#${el.dataset.provider}-form`);
-            const provider_link = el.querySelector("a");
-            provider_link?.addEventListener("click", async (event) => {
-                event.preventDefault();
-                if (provider_form) {
-                    provider_form.classList.remove("hidden");
-                    provider_forms.classList.remove("hidden");
-                    chat.classList.add("hidden");
-                }
-                return false;
-            });
-            document.getElementById("close_provider_forms").addEventListener("click", async () => {
-                provider_form.classList.add("hidden");
-                provider_forms.classList.add("hidden");
-                chat.classList.remove("hidden");
-            });
-        }
+        const provider_forms = document.querySelector(".provider_forms");
+        const provider_form = provider_forms.querySelector(`#${el.dataset.provider}-form`);
+        const provider_link = el.querySelector("a");
+        provider_link?.addEventListener("click", async (event) => {
+            event.preventDefault();
+            if (provider_form) {
+                provider_form.classList.remove("hidden");
+                provider_forms.classList.remove("hidden");
+                chat.classList.add("hidden");
+            }
+            return false;
+        });
+        document.getElementById("close_provider_forms").addEventListener("click", async () => {
+            provider_form.classList.add("hidden");
+            provider_forms.classList.add("hidden");
+            chat.classList.remove("hidden");
+        });
     });
 
-    message_box.querySelectorAll(".message .fa-xmark").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            el.addEventListener("click", async () => {
-                const message_el = get_message_el(el);
-                await remove_message(window.conversation_id, message_el.dataset.index);
-                await safe_load_conversation(window.conversation_id, false);
-            });
-        }
-    });
+    message_box.querySelectorAll(".message .fa-xmark").forEach(async (el) => el.addEventListener("click", async () => {
+        const message_el = get_message_el(el);
+        await remove_message(window.conversation_id, message_el.dataset.index);
+        message_el.remove();
+        await safe_load_conversation(window.conversation_id, false);
+    }));
 
-    message_box.querySelectorAll(".message .fa-clipboard").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            el.addEventListener("click", async () => {
-                let message_el = get_message_el(el);
-                let response = await fetch(message_el.dataset.object_url);
-                let copyText = await response.text();
-                try {        
-                    if (!navigator.clipboard) {
-                        throw new Error("navigator.clipboard: Clipboard API unavailable.");
-                    }
-                    await navigator.clipboard.writeText(copyText);
-                } catch (e) {
-                    console.error(e);
-                    console.error("Clipboard API writeText() failed! Fallback to document.exec(\"copy\")...");
-                    fallback_clipboard(copyText);
-                }
-                el.classList.add("clicked");
-                setTimeout(() => el.classList.remove("clicked"), 1000);
-            })
+    message_box.querySelectorAll(".message .fa-clipboard").forEach(async (el) => el.addEventListener("click", async () => {
+        let message_el = get_message_el(el);
+        let response = await fetch(message_el.dataset.object_url);
+        let copyText = await response.text();
+        try {        
+            if (!navigator.clipboard) {
+                throw new Error("navigator.clipboard: Clipboard API unavailable.");
+            }
+            await navigator.clipboard.writeText(copyText);
+        } catch (e) {
+            console.error(e);
+            console.error("Clipboard API writeText() failed! Fallback to document.exec(\"copy\")...");
+            fallback_clipboard(copyText);
         }
-    });
+        el.classList.add("clicked");
+        setTimeout(() => el.classList.remove("clicked"), 1000);
+    }))
 
-    message_box.querySelectorAll(".message .fa-file-export").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            //
-            el.addEventListener("click", async () => {
-                const elem = window.document.createElement('a');
-                let filename = `chat ${new Date().toLocaleString()}.md`.replaceAll(":", "-");
-                const conversation = await get_conversation(window.conversation_id);
-                let buffer = "";
-                conversation.items.forEach(message => {
-                    buffer += render_reasoning_text(message.reasoning);
-                    buffer += `${message.role == 'user' ? 'User' : 'Assistant'}: ${message.content.trim()}\n\n\n`;
-                });
-                var download = document.getElementById("download");
-                download.setAttribute("href", "data:text/markdown;charset=utf-8," + encodeURIComponent(buffer.trim()));
-                download.setAttribute("download", filename);
-                download.click();
-                el.classList.add("clicked");
-                setTimeout(() => el.classList.remove("clicked"), 1000);
-            })
-        }
-    });
+    message_box.querySelectorAll(".message .fa-file-export").forEach(async (el) => el.addEventListener("click", async () => {
+        const elem = window.document.createElement('a');
+        let filename = `chat ${new Date().toLocaleString()}.md`.replaceAll(":", "-");
+        const conversation = await get_conversation(window.conversation_id);
+        let buffer = "";
+        conversation.items.forEach(message => {
+            if (message.reasoning) {
+                buffer += render_reasoning_text(message.reasoning);
+            }
+            buffer += `${message.role == 'user' ? 'User' : 'Assistant'}: ${message.content.trim()}\n\n\n`;
+        });
+        var download = document.getElementById("download");
+        download.setAttribute("href", "data:text/markdown;charset=utf-8," + encodeURIComponent(buffer.trim()));
+        download.setAttribute("download", filename);
+        download.click();
+        el.classList.add("clicked");
+        setTimeout(() => el.classList.remove("clicked"), 1000);
+    }))
 
-    message_box.querySelectorAll(".message .fa-volume-high").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            el.addEventListener("click", async () => {
-                const message_el = get_message_el(el);
-                let audio;
-                if (message_el.dataset.synthesize_url) {
-                    el.classList.add("active");
-                    setTimeout(()=>el.classList.remove("active"), 2000);
-                    const media_player = document.querySelector(".media_player");
-                    if (!media_player.classList.contains("show")) {
-                        media_player.classList.add("show");
-                        audio = new Audio(message_el.dataset.synthesize_url);
-                        audio.controls = true;   
-                        media_player.appendChild(audio);
-                    } else {
-                        audio = media_player.querySelector("audio");
-                        audio.src = message_el.dataset.synthesize_url;
-                    }
-                    audio.play();
-                    return;
-                }
-            });
+    message_box.querySelectorAll(".message .fa-volume-high").forEach(async (el) => el.addEventListener("click", async () => {
+        const message_el = get_message_el(el);
+        let audio;
+        if (message_el.dataset.synthesize_url) {
+            el.classList.add("active");
+            setTimeout(()=>el.classList.remove("active"), 2000);
+            const media_player = document.querySelector(".media_player");
+            if (!media_player.classList.contains("show")) {
+                media_player.classList.add("show");
+                audio = new Audio(message_el.dataset.synthesize_url);
+                audio.controls = true;   
+                media_player.appendChild(audio);
+            } else {
+                audio = media_player.querySelector("audio");
+                audio.src = message_el.dataset.synthesize_url;
+            }
+            audio.play();
+            return;
         }
-    });
+    }));
 
-    message_box.querySelectorAll(".message .regenerate_button").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            el.addEventListener("click", async () => {
-                const message_el = get_message_el(el);
-                el.classList.add("clicked");
-                setTimeout(() => el.classList.remove("clicked"), 1000);
-                await ask_gpt(get_message_id(), message_el.dataset.index);
-            });
-        }
-    });
+    message_box.querySelectorAll(".message .regenerate_button").forEach(async (el) => el.addEventListener("click", async () => {
+        const message_el = get_message_el(el);
+        el.classList.add("clicked");
+        setTimeout(() => el.classList.remove("clicked"), 1000);
+        await ask_gpt(get_message_id(), message_el.dataset.index);
+    }));
 
-    message_box.querySelectorAll(".message .continue_button").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            el.addEventListener("click", async () => {
-                if (!el.disabled) {
-                    el.disabled = true;
-                    const message_el = get_message_el(el);
-                    el.classList.add("clicked");
-                    setTimeout(() => {el.classList.remove("clicked"); el.disabled = false}, 1000);
-                    await ask_gpt(get_message_id(), message_el.dataset.index, false, null, null, "continue");
-                }
-            });
-        }
-    });
+    message_box.querySelectorAll(".message .continue_button").forEach(async (el) => el.addEventListener("click", async () => {
+        if (!el.disabled) {
+            el.disabled = true;
+            const message_el = get_message_el(el);
+            el.classList.add("clicked");
+            setTimeout(() => {el.classList.remove("clicked"); el.disabled = false}, 1000);
+            await ask_gpt(get_message_id(), message_el.dataset.index, false, null, null, "continue");
+        }}
+    ));
 
-    message_box.querySelectorAll(".message .fa-whatsapp").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            el.addEventListener("click", async () => {
-                const text = get_message_el(el).innerText;
-                window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-            });
-        }
-    });
+    message_box.querySelectorAll(".message .fa-whatsapp").forEach(async (el) => el.addEventListener("click", async () => {
+        const text = get_message_el(el).innerText;
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    }));
 
-    message_box.querySelectorAll(".message .fa-print").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            el.addEventListener("click", async () => {
-                const message_el = get_message_el(el);
-                el.classList.add("clicked");
-                message_box.scrollTop = 0;
-                message_el.classList.add("print");
-                setTimeout(() => {
-                    el.classList.remove("clicked");
-                    message_el.classList.remove("print");
-                }, 1000);
-                window.print()
-            })
-        }
-    });
+    message_box.querySelectorAll(".message .fa-print").forEach(async (el) => el.addEventListener("click", async () => {
+        const message_el = get_message_el(el);
+        el.classList.add("clicked");
+        message_box.scrollTop = 0;
+        message_el.classList.add("print");
+        setTimeout(() => {
+            el.classList.remove("clicked");
+            message_el.classList.remove("print");
+        }, 1000);
+        window.print()
+    }));
 
-    message_box.querySelectorAll(".message .reasoning_title").forEach(async (el) => {
-        if (!("click" in el.dataset)) {
-            el.dataset.click = "true";
-            el.addEventListener("click", async () => {
-                let text_el = el.parentElement.querySelector(".reasoning_text");
-                if (text_el) {
-                    text_el.classList[text_el.classList.contains("hidden") ? "remove" : "add"]("hidden");
-                }
-            })
+    message_box.querySelectorAll(".message .reasoning_title").forEach(async (el) => el.addEventListener("click", async () => {
+        let text_el = el.parentElement.querySelector(".reasoning_text");
+        if (text_el) {
+            text_el.classList[text_el.classList.contains("hidden") ? "remove" : "add"]("hidden");
         }
-    });
+    }));
 }
 
 const delete_conversations = async () => {
@@ -446,6 +406,23 @@ const handle_ask = async (do_ask_gpt = true) => {
     await count_input()
     await add_conversation(window.conversation_id);
 
+    // Is message a url?
+    const expression = /^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$/gi;
+    const regex = new RegExp(expression);
+    if (message.match(regex)) {
+        paperclip.classList.add("blink");
+        const blob = new Blob([JSON.stringify([{url: message}])], { type: 'application/json' });
+        const file = new File([blob], 'downloads.json', { type: 'application/json' }); // Create File object
+        let formData = new FormData();
+        formData.append('files', file); // Append as a file
+        const bucket_id = uuid();
+        await fetch(`/backend-api/v2/files/${bucket_id}`, {
+            method: 'POST',
+            body: formData
+        });
+        connectToSSE(`/backend-api/v2/files/${bucket_id}`, false, bucket_id); //Retrieve and refine
+        return;
+    }
     let message_index = await add_message(window.conversation_id, "user", message);
     let message_id = get_message_id();
 
@@ -463,25 +440,27 @@ const handle_ask = async (do_ask_gpt = true) => {
             imageInput.dataset.objects = images.join(" ");
         }
     }
-    message_box.innerHTML += `
-        <div class="message" data-index="${message_index}">
-            <div class="user">
-                ${user_image}
-                <i class="fa-solid fa-xmark"></i>
-                <i class="fa-regular fa-phone-arrow-up-right"></i>
+    const message_el = document.createElement("div");
+    message_el.classList.add("message");
+    message_el.dataset.index = message_index;
+    message_el.innerHTML = `
+        <div class="user">
+            ${user_image}
+            <i class="fa-solid fa-xmark"></i>
+            <i class="fa-regular fa-phone-arrow-up-right"></i>
+        </div>
+        <div class="content" id="user_${message_id}"> 
+            <div class="content_inner">
+            ${markdown_render(message)}
+            ${images.map((object)=>`<img src="${object}" alt="Image upload">`).join("")}
             </div>
-            <div class="content" id="user_${message_id}"> 
-                <div class="content_inner">
-                ${markdown_render(message)}
-                ${images.map((object)=>'<img src="' + object + '" alt="Image upload">').join("")}
-                </div>
-                <div class="count">
-                    ${count_words_and_tokens(message, get_selected_model()?.value)}
-                </div>
+            <div class="count">
+                ${countTokensEnabled ? count_words_and_tokens(message, get_selected_model()?.value) : ""}
             </div>
         </div>
     `;
-    highlight(message_box);
+    message_box.appendChild(message_el);
+    highlight(message_el);
     if (do_ask_gpt) {
         const all_pinned = document.querySelectorAll(".buttons button.pinned")
         if (all_pinned.length > 0) {
@@ -507,6 +486,10 @@ async function safe_remove_cancel_button() {
         }
     }
     stop_generating.classList.add("stop_generating-hidden");
+    if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+    }
 }
 
 regenerate_button.addEventListener("click", async () => {
@@ -806,6 +789,9 @@ async function add_message_chunk(message, message_id, provider, scroll, finish_m
         error_storage[message_id] = message.message
         console.error(message.message);
         content_map.inner.innerHTML += markdown_render(`**An error occured:** ${message.message}`);
+        if (finish_message) {
+            await finish_message();
+        }
         let p = document.createElement("p");
         p.innerText = message.error;
         log_storage.appendChild(p);
@@ -868,6 +854,15 @@ function is_stopped() {
     return false;
 }
 
+const requestWakeLock = async (onVisibilityChange = false) => {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+    catch(err) {
+      console.error(err);
+    }
+  };
+
 const ask_gpt = async (message_id, message_index = -1, regenerate = false, provider = null, model = null, action = null) => {
     if (!model && !provider) {
         model = get_selected_model()?.value || null;
@@ -877,6 +872,7 @@ const ask_gpt = async (message_id, message_index = -1, regenerate = false, provi
     if (!conversation) {
         return;
     }
+    await requestWakeLock();
     messages = prepare_messages(conversation.items, message_index, action=="continue");
     message_storage[message_id] = "";
     stop_generating.classList.remove("stop_generating-hidden");
@@ -888,16 +884,17 @@ const ask_gpt = async (message_id, message_index = -1, regenerate = false, provi
     if (scroll) {
         await lazy_scroll_to_bottom();
     }
-
-    let count_total = message_box.querySelector('.count_total');
-    count_total ? count_total.parentElement.removeChild(count_total) : null;
+    if (countTokensEnabled) {
+        let count_total = message_box.querySelector('.count_total');
+        count_total ? count_total.parentElement.removeChild(count_total) : null;
+    }
 
     const message_el = document.createElement("div");
     message_el.classList.add("message");
     if (message_index != -1 || regenerate) {
         message_el.classList.add("regenerate");
     }
-    message_el.innerHTML += `
+    message_el.innerHTML = `
         <div class="assistant">
             ${gpt_image}
             <i class="fa-solid fa-xmark"></i>
@@ -956,10 +953,11 @@ const ask_gpt = async (message_id, message_index = -1, regenerate = false, provi
                 ...usage
             }
             // Calculate usage if we don't have it jet
-            if (document.getElementById("track_usage").checked && !usage.prompt_tokens && window.GPTTokenizer_cl100k_base) {
+            if (countTokensEnabled && document.getElementById("track_usage").checked && !usage.prompt_tokens && window.GPTTokenizer_cl100k_base) {
                 const prompt_token_model = model?.startsWith("gpt-3") ? "gpt-3.5-turbo" : "gpt-4"
                 const prompt_tokens = GPTTokenizer_cl100k_base?.encodeChat(messages, prompt_token_model).length;
-                const completion_tokens = count_tokens(message_provider?.model, message_storage[message_id]);
+                const completion_tokens = count_tokens(message_provider?.model, message_storage[message_id])
+                    + reasoning_storage[message_id] ? count_tokens(message_provider?.model, reasoning_storage[message_id].text) : 0;
                 usage = {
                     ...usage,
                     prompt_tokens: prompt_tokens,
@@ -1015,23 +1013,24 @@ const ask_gpt = async (message_id, message_index = -1, regenerate = false, provi
             await lazy_scroll_to_bottom();
         }
         await safe_remove_cancel_button();
-        await register_message_buttons();
         await register_message_images();
         await load_conversations();
         regenerate_button.classList.remove("regenerate-hidden");
     }
     try {
         let api_key;
-        if (is_demo && provider == "Feature") {
+        if (is_demo && ["OpenaiChat", "DeepSeekAPI", "PollinationsAI", "Gemini"].includes(provider)) {
             api_key = localStorage.getItem("user");
+        } else if (["HuggingSpace", "G4F"].includes(provider)) {
+            api_key = localStorage.getItem("HuggingSpace-api_key");
         } else if (is_demo) {
             api_key = localStorage.getItem("HuggingFace-api_key");
+            if (!api_key) {
+                location.href = "/";
+                return;
+            }
         } else {
             api_key = get_api_key_by_provider(provider);
-        }
-        if (is_demo && !api_key) {
-            location.href = "/";
-            return;
         }
         const input = imageInput && imageInput.files.length > 0 ? imageInput : cameraInput;
         const files = input && input.files.length > 0 ? input.files : null;
@@ -1057,7 +1056,6 @@ const ask_gpt = async (message_id, message_index = -1, regenerate = false, provi
             api_key: api_key,
             api_base: api_base,
             ignored: ignored,
-            zerogpu_token: localStorage.getItem("zerogpu_token")
         }, files, message_id, scroll, finish_message);
     } catch (e) {
         console.error(e);
@@ -1105,9 +1103,30 @@ const clear_conversation = async () => {
     }
 };
 
+var illegalRe = /[\/\?<>\\:\*\|":]/g;
+var controlRe = /[\x00-\x1f\x80-\x9f]/g;
+var reservedRe = /^\.+$/;
+var windowsReservedRe = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
+
+function sanitize(input, replacement) {
+  var sanitized = input
+    .replace(illegalRe, replacement)
+    .replace(controlRe, replacement)
+    .replace(reservedRe, replacement)
+    .replace(windowsReservedRe, replacement);
+  return sanitized.replaceAll(/\/|#|\s{2,}/g, replacement).trim();
+}
+
 async function set_conversation_title(conversation_id, title) {
     conversation = await get_conversation(conversation_id)
     conversation.new_title = title;
+    const new_id = sanitize(title, " ");
+    if (new_id && !appStorage.getItem(`conversation:${new_id}`)) {
+        appStorage.removeItem(`conversation:${conversation.id}`);
+        title_ids_storage[conversation_id] = new_id;
+        conversation.id = new_id;
+        add_url_to_history(`/chat/${conversation_id}`);
+    }
     appStorage.setItem(
         `conversation:${conversation.id}`,
         JSON.stringify(conversation)
@@ -1132,6 +1151,7 @@ const show_option = async (conversation_id) => {
         input_el.onclick = (e) => e.stopPropagation()
         input_el.onfocus = () => trash_el.style.display = "none";
         input_el.onchange = () => set_conversation_title(conversation_id, input_el.value);
+        input_el.onblur = () => set_conversation_title(conversation_id, input_el.value);
         left_el.removeChild(title_el);
         left_el.appendChild(input_el);
     }
@@ -1171,6 +1191,9 @@ const delete_conversation = async (conversation_id) => {
 };
 
 const set_conversation = async (conversation_id) => {
+    if (title_ids_storage[conversation_id]) {
+        conversation_id = title_ids_storage[conversation_id];
+    }
     try {
         add_url_to_history(`/chat/${conversation_id}`);
     } catch (e) {
@@ -1350,12 +1373,17 @@ const load_conversation = async (conversation_id, scroll=true) => {
             }
         }
 
-        if (!item.continue) {
-            completion_tokens = 0;
+        countTokensEnabled = appStorage.getItem("countTokens") != "false";
+        let next_usage;
+        let prompt_tokens; 
+        if (countTokensEnabled) {
+            if (!item.continue) {
+                completion_tokens = 0;
+            }
+            completion_tokens += item.usage?.completion_tokens ? item.usage.completion_tokens : 0;
+            next_usage = messages.length > next_i ? messages[next_i].usage : null;
+            prompt_tokens = next_usage?.prompt_tokens ? next_usage?.prompt_tokens : 0
         }
-        completion_tokens += item.usage?.completion_tokens ? item.usage.completion_tokens : 0;
-        let next_usage = messages.length > next_i ? messages[next_i].usage : null;
-        let prompt_tokens = next_usage?.prompt_tokens ? next_usage?.prompt_tokens : 0
 
         elements.push(`
             <div class="message${item.regenerate ? " regenerate": ""}" data-index="${i}" data-object_url="${objectUrl}" data-synthesize_url="${synthesize_url}">
@@ -1374,7 +1402,10 @@ const load_conversation = async (conversation_id, scroll=true) => {
                         ${markdown_render(buffer)}
                     </div>
                     <div class="count">
-                        ${count_words_and_tokens(buffer, next_provider?.model, completion_tokens, prompt_tokens)}
+                        ${countTokensEnabled ? count_words_and_tokens(
+                            item.reasoning ? item.reasoning.text + buffer : buffer,
+                            next_provider?.model, completion_tokens, prompt_tokens
+                        ) : ""}
                         ${add_buttons.join("")}
                     </div>
                 </div>
@@ -1382,7 +1413,7 @@ const load_conversation = async (conversation_id, scroll=true) => {
         `);
     });
 
-    if (window.GPTTokenizer_cl100k_base) {
+    if (countTokensEnabled && window.GPTTokenizer_cl100k_base) {
         const filtered = prepare_messages(messages, null, true, false);
         if (filtered.length > 0) {
             last_model = last_model?.startsWith("gpt-3") ? "gpt-3.5-turbo" : "gpt-4"
@@ -1844,7 +1875,12 @@ function update_message(content_map, message_id, content = null, scroll = true) 
         } else {
             content_map.inner.innerHTML = content;
         }
-        content_map.count.innerText = count_words_and_tokens(message_storage[message_id], provider_storage[message_id]?.model);
+        if (countTokensEnabled) {
+            content_map.count.innerText = count_words_and_tokens(
+                (reasoning_storage[message_id] ? reasoning_storage[message_id].text : "")
+                + message_storage[message_id],
+                provider_storage[message_id]?.model);
+        }
         highlight(content_map.inner);
         if (scroll) {
             lazy_scroll_to_bottom();
@@ -1856,7 +1892,7 @@ function update_message(content_map, message_id, content = null, scroll = true) 
 
 let countFocus = messageInput;
 const count_input = async () => {
-    if (countFocus.value) {
+    if (countTokensEnabled && countFocus.value) {
         if (window.matchMedia("(pointer:coarse)")) {
             inputCount.innerText = `(${count_tokens(get_selected_model()?.value, countFocus.value)} tokens)`;
         } else {
@@ -1908,11 +1944,11 @@ async function on_load() {
             messageInput.focus();
             //await handle_ask();
         }
-    } else if (/\/chat\/[^?]+/.test(window.location.href)) {
-        load_conversation(window.conversation_id);
-    } else {
+    } else if (/\/chat\/[?$]/.test(window.location.href)) {
         chatPrompt.value = document.getElementById("systemPrompt")?.value || "";
         say_hello();
+    } else {
+        load_conversation(window.conversation_id);
     }
     load_conversations();
 }
@@ -1933,6 +1969,7 @@ const load_provider_option = (input, provider_name) => {
             (el) => el.removeAttribute("disabled")
         );
         settings.querySelector(`.field:has(#${provider_name}-api_key)`)?.classList.remove("hidden");
+        settings.querySelector(`.field:has(#${provider_name}-api_base)`)?.classList.remove("hidden");
     } else {
         modelSelect.querySelectorAll(`option[data-providers*="${provider_name}"]`).forEach(
             (el) => {
@@ -1947,7 +1984,7 @@ const load_provider_option = (input, provider_name) => {
         providerSelect.querySelectorAll(`option[data-parent="${provider_name}"]`).forEach(
             (el) => el.setAttribute("disabled", "disabled")
         );
-        settings.querySelector(`.field:has(#${provider_name}-api_key)`)?.classList.add("hidden");
+        //settings.querySelector(`.field:has(#${provider_name}-api_key)`)?.classList.add("hidden");
     }
 };
 
@@ -2001,12 +2038,15 @@ async function on_api() {
             return;
         }
         providerSelect.innerHTML = `
-            <option value="">Demo Mode</option>
-            <option value="Feature">Feature Provider</option>
+            <option value="" selected="selected">Demo Mode</option>
+            <option value="DeepSeekAPI">DeepSeek Provider</option>
+            <option value="OpenaiChat">OpenAI Provider</option>
+            <option value="PollinationsAI">Pollinations AI</option>
             <option value="G4F">G4F framework</option>
+            <option value="Gemini">Gemini Provider</option>
             <option value="HuggingFace">HuggingFace</option>
-            <option value="HuggingSpace">HuggingSpace</option>`;
-        providerSelect.selectedIndex = 0;
+            <option value="HuggingSpace">HuggingSpace</option>
+            <option value="HuggingChat">HuggingChat</option>`;
         document.getElementById("pin").disabled = true;
         document.getElementById("refine")?.parentElement.classList.add("hidden")
         const track_usage = document.getElementById("track_usage");
@@ -2018,7 +2058,8 @@ async function on_api() {
             }
         });
         login_urls = {
-            "HuggingFace": ["HuggingFace", "", []],
+            "HuggingFace": ["HuggingFace", "https://huggingface.co/settings/tokens", []],
+            "HuggingSpace": ["HuggingSpace", "https://huggingface.co/spaces/roxky/g4f-new?get_gpu_token=true", []],
         };
     } else {
         providers = await api("providers")
@@ -2039,13 +2080,13 @@ async function on_api() {
 
             if (provider.parent) {
                 if (!login_urls[provider.parent]) {
-                    login_urls[provider.parent] = [provider.label, provider.login_url, [provider.name]];
+                    login_urls[provider.parent] = [provider.label, provider.login_url, [provider.name], provider.auth];
                 } else {
                     login_urls[provider.parent][2].push(provider.name);
                 }
             } else if (provider.login_url) {
                 if (!login_urls[provider.name]) {
-                    login_urls[provider.name] = [provider.label, provider.login_url, []];
+                    login_urls[provider.name] = [provider.label, provider.login_url, [], provider.auth];
                 } else {
                     login_urls[provider.name][0] = provider.label;
                     login_urls[provider.name][1] = provider.login_url;
@@ -2068,9 +2109,10 @@ async function on_api() {
             if (!provider.parent) {
                 let option = document.createElement("div");
                 option.classList.add("provider-item");
+                let api_key = appStorage.getItem(`${provider.name}-api_key`);
                 option.innerHTML = `
                     <span class="label">Enable ${provider.label}</span>
-                    <input id="Provider${provider.name}" type="checkbox" name="Provider${provider.name}" value="${provider.name}" class="provider" checked="">
+                    <input id="Provider${provider.name}" type="checkbox" name="Provider${provider.name}" value="${provider.name}" class="provider" ${!provider.auth || api_key ? 'checked="checked"' : ''}/>
                     <label for="Provider${provider.name}" class="toogle" title="Remove provider from dropdown"></label>
                 `;
                 option.querySelector("input").addEventListener("change", (event) => load_provider_option(event.target, provider.name));
@@ -2102,17 +2144,25 @@ async function on_api() {
     `;
     settings.querySelector(".paper").appendChild(providersListContainer);
 
-    for (let [name, [label, login_url, childs]] of Object.entries(login_urls)) {
+    for (let [name, [label, login_url, childs, auth]] of Object.entries(login_urls)) {
         if (!login_url && !is_demo) {
             continue;
         }
         let providerBox = document.createElement("div");
         providerBox.classList.add("field", "box");
         childs = childs.map((child) => `${child}-api_key`).join(" ");
+        const placeholder = `placeholder="${name == "HuggingSpace" ? "zerogpu_token" : "api_key"}"`;
         providerBox.innerHTML = `
             <label for="${name}-api_key" class="label" title="">${label}:</label>
-            <input type="text" id="${name}-api_key" name="${name}[api_key]" class="${childs}" placeholder="api_key" autocomplete="off"/>
+            <input type="text" id="${name}-api_key" name="${name}[api_key]" class="${childs}" ${placeholder} autocomplete="off"/>
         ` + (login_url ? `<a href="${login_url}" target="_blank" title="Login to ${label}">Get API key</a>` : "");
+        if (auth) {
+            providerBox.querySelector("input").addEventListener("input", (event) => {
+                const input = document.getElementById(`Provider${name}`);
+                input.checked = !!event.target.value;
+                load_provider_option(input, name);
+            });
+        }
         providersListContainer.querySelector(".collapsible-content").appendChild(providerBox);
     }
 
@@ -2251,14 +2301,51 @@ function formatFileSize(bytes) {
     return `${bytes.toFixed(2)} ${units[unitIndex]}`;
 }
 
+function connectToSSE(url, do_refine, bucket_id) {
+    const eventSource = new EventSource(url);
+    eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+            inputCount.innerText = `Error: ${data.error.message}`;
+            paperclip.classList.remove("blink");
+            fileInput.value = "";
+        } else if (data.action == "load") {
+            inputCount.innerText = `Read data: ${formatFileSize(data.size)}`;
+        } else if (data.action == "refine") {
+            inputCount.innerText = `Refine data: ${formatFileSize(data.size)}`;
+        } else if (data.action == "download") {
+            inputCount.innerText = `Download: ${data.count} files`;
+        } else if (data.action == "done") {
+            if (do_refine) {
+                do_refine = false;
+                connectToSSE(`/backend-api/v2/files/${bucket_id}?refine_chunks_with_spacy=true`, do_refine, bucket_id);
+                return;
+            }
+            appStorage.setItem(`bucket:${bucket_id}`, data.size);
+            inputCount.innerText = "Files are loaded successfully";
+            if (!messageInput.value) {
+                messageInput.value = JSON.stringify({bucket_id: bucket_id});
+                handle_ask(false);
+            } else {
+                messageInput.value += (messageInput.value ? "\n" : "") + JSON.stringify({bucket_id: bucket_id}) + "\n";
+                paperclip.classList.remove("blink");
+                fileInput.value = "";
+            }
+        }
+    };
+    eventSource.onerror = (event) => {
+        eventSource.close();
+        paperclip.classList.remove("blink");
+    }
+}
+
 async function upload_files(fileInput) {
-    const paperclip = document.querySelector(".user-input .fa-paperclip");
     const bucket_id = uuid();
     paperclip.classList.add("blink");
 
     const formData = new FormData();
     Array.from(fileInput.files).forEach(file => {
-        formData.append('files[]', file);
+        formData.append('files', file);
     });
     await fetch("/backend-api/v2/files/" + bucket_id, {
         method: 'POST',
@@ -2266,44 +2353,7 @@ async function upload_files(fileInput) {
     });
 
     let do_refine = document.getElementById("refine")?.checked;
-    function connectToSSE(url) {
-        const eventSource = new EventSource(url);
-        eventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.error) {
-                inputCount.innerText = `Error: ${data.error.message}`;
-                paperclip.classList.remove("blink");
-                fileInput.value = "";
-            } else if (data.action == "load") {
-                inputCount.innerText = `Read data: ${formatFileSize(data.size)}`;
-            } else if (data.action == "refine") {
-                inputCount.innerText = `Refine data: ${formatFileSize(data.size)}`;
-            } else if (data.action == "download") {
-                inputCount.innerText = `Download: ${data.count} files`;
-            } else if (data.action == "done") {
-                if (do_refine) {
-                    do_refine = false;
-                    connectToSSE(`/backend-api/v2/files/${bucket_id}?refine_chunks_with_spacy=true`);
-                    return;
-                }
-                appStorage.setItem(`bucket:${bucket_id}`, data.size);
-                inputCount.innerText = "Files are loaded successfully";
-                if (!messageInput.value) {
-                    messageInput.value = JSON.stringify({bucket_id: bucket_id});
-                    handle_ask(false);
-                } else {
-                    messageInput.value += (messageInput.value ? "\n" : "") + JSON.stringify({bucket_id: bucket_id}) + "\n";
-                    paperclip.classList.remove("blink");
-                    fileInput.value = "";
-                }
-            }
-        };
-        eventSource.onerror = (event) => {
-            eventSource.close();
-            paperclip.classList.remove("blink");
-        }
-    }
-    connectToSSE(`/backend-api/v2/files/${bucket_id}`);
+    connectToSSE(`/backend-api/v2/files/${bucket_id}`, do_refine, bucket_id);
 }
 
 fileInput.addEventListener('change', async (event) => {
@@ -2322,14 +2372,24 @@ fileInput.addEventListener('change', async (event) => {
                 if (data.options && "g4f" in data.options) {
                     let count = 0;
                     Object.keys(data).forEach(key => {
-                        if (key != "options" && !localStorage.getItem(key)) {
-                            appStorage.setItem(key, JSON.stringify(data[key]));
-                            count += 1;
+                        if (key == "options") {
+                            Object.keys(data[key]).forEach(keyOption => {
+                                appStorage.setItem(keyOption, data[key][keyOption]);
+                                count += 1;
+                            });
+                        } else if (!localStorage.getItem(key)) {
+                            if (key.startsWith("conversation:")) {
+                                appStorage.setItem(key, JSON.stringify(data[key]));
+                                count += 1;
+                            } else {
+                                appStorage.setItem(key, data[key]);
+                            }
                         }
                     });
                     await load_conversations();
+                    await load_settings_storage();
                     fileInput.value = "";
-                    inputCount.innerText = `${count} Conversations were imported successfully`;
+                    inputCount.innerText = `${count} Conversations/Settings were imported successfully`;
                 } else {
                     is_cookie_file = data.api_key;
                     if (Array.isArray(data)) {
@@ -2385,7 +2445,11 @@ async function api(ressource, args=null, files=null, message_id=null, scroll=tru
         }
         return pywebview.api[`get_${ressource}`]();
     }
+    const user = localStorage.getItem("user");
     const headers = {};
+    if (user) {
+        headers.x_user = user;
+    }
     let url = `/backend-api/v2/${ressource}`;
     let response;
     if (ressource == "models" && args) {
@@ -2404,7 +2468,7 @@ async function api(ressource, args=null, files=null, message_id=null, scroll=tru
         if (files !== null) {
             const formData = new FormData();
             for (const file of files) {
-                formData.append('files[]', file)
+                formData.append('files', file)
             }
             formData.append('json', body);
             body = formData;
@@ -2592,30 +2656,32 @@ searchButton.addEventListener("click", async () => {
     messageInput.focus();
 });
 
-function save_storage() {
-    let filename = `chat ${new Date().toLocaleString()}.json`.replaceAll(":", "-");
+function save_storage(settings=false) {
+    let filename = `${settings ? 'settings' : 'chat'} ${new Date().toLocaleString()}.json`.replaceAll(":", "-");
     let data = {"options": {"g4f": ""}};
     for (let i = 0; i < appStorage.length; i++) {
         let key = appStorage.key(i);
         let item = appStorage.getItem(key);
         if (key.startsWith("conversation:")) {
-            data[key] = JSON.parse(item);
-        } else if (!key.includes("api_key")) {
+            if (!settings) {
+                data[key] = JSON.parse(item);
+            }
+        } else if (key.startsWith("bucket:")) {
+            if (!settings) {
+                data[key] = item;
+            }
+        } else if (settings && !key.endsWith("-form") && !key.endsWith("user")) {
             data["options"][key] = item;
-        }
+        } 
     }
     data = JSON.stringify(data, null, 4);
     const blob = new Blob([data], {type: 'application/json'});
-    if(window.navigator.msSaveOrOpenBlob) {
-        window.navigator.msSaveBlob(blob, filename);
-    } else{
-        const elem = window.document.createElement('a');
-        elem.href = window.URL.createObjectURL(blob);
-        elem.download = filename;        
-        document.body.appendChild(elem);
-        elem.click();        
-        document.body.removeChild(elem);
-    }
+    const elem = window.document.createElement('a');
+    elem.href = window.URL.createObjectURL(blob);
+    elem.download = filename;        
+    document.body.appendChild(elem);
+    elem.click();        
+    document.body.removeChild(elem);
 }
 
 function import_memory() {

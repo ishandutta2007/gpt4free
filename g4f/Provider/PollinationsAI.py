@@ -39,9 +39,12 @@ class PollinationsAI(AsyncGeneratorProvider, ProviderModelMixin):
     default_model = "openai"
     default_image_model = "flux"
     default_vision_model = "gpt-4o"
+    text_models = [default_model]
+    image_models = [default_image_model]
     extra_image_models = ["flux-pro", "flux-dev", "flux-schnell", "midjourney", "dall-e-3"]
     vision_models = [default_vision_model, "gpt-4o-mini"]
     extra_text_models = ["claude", "claude-email", "deepseek-reasoner", "deepseek-r1"] + vision_models
+    _models_loaded = False
     model_aliases = {
         ### Text Models ###
         "gpt-4o-mini": "openai",
@@ -66,28 +69,51 @@ class PollinationsAI(AsyncGeneratorProvider, ProviderModelMixin):
         ### Image Models ###
         "sdxl-turbo": "turbo",
     }
-    text_models = []
-    image_models = []
 
     @classmethod
     def get_models(cls, **kwargs):
-        if not cls.text_models or not cls.image_models:
+        if not cls._models_loaded:
             try:
+                # Update of image models
                 image_response = requests.get("https://image.pollinations.ai/models")
                 image_response.raise_for_status()
                 new_image_models = image_response.json()
-                cls.image_models = list(dict.fromkeys([*cls.extra_image_models, *new_image_models]))
                 
+                # Combine models without duplicates
+                all_image_models = (
+                    cls.image_models +  # Already contains the default
+                    cls.extra_image_models + 
+                    new_image_models
+                )
+                cls.image_models = list(dict.fromkeys(all_image_models))
+
+                # Update of text models
                 text_response = requests.get("https://text.pollinations.ai/models")
                 text_response.raise_for_status()
-                original_text_models = [model.get("name") for model in text_response.json()]
-                
-                combined_text = cls.extra_text_models + [
-                    model for model in original_text_models 
-                    if model not in cls.extra_text_models
+                original_text_models = [
+                    model.get("name") 
+                    for model in text_response.json()
                 ]
+                
+                # Combining text models
+                combined_text = (
+                    cls.text_models +  # Already contains the default
+                    cls.extra_text_models + 
+                    [
+                        model for model in original_text_models
+                        if model not in cls.extra_text_models
+                    ]
+                )
                 cls.text_models = list(dict.fromkeys(combined_text))
+                
+                cls._models_loaded = True
+
             except Exception as e:
+                # Save default models in case of an error
+                if not cls.text_models:
+                    cls.text_models = [cls.default_model]
+                if not cls.image_models:
+                    cls.image_models = [cls.default_image_model]
                 raise RuntimeError(f"Failed to fetch models: {e}") from e
             
         return cls.text_models + cls.image_models
@@ -115,6 +141,7 @@ class PollinationsAI(AsyncGeneratorProvider, ProviderModelMixin):
         cache: bool = False,
         **kwargs
     ) -> AsyncResult:
+        cls.get_models()
         if images is not None and not model:
             model = cls.default_vision_model
         try:
@@ -122,9 +149,6 @@ class PollinationsAI(AsyncGeneratorProvider, ProviderModelMixin):
         except ModelNotFoundError:
             if model not in cls.image_models:
                 raise
-        
-        if not cache and seed is None:
-            seed = random.randint(0, 10000)
 
         if model in cls.image_models:
             async for chunk in cls._generate_image(
@@ -134,6 +158,7 @@ class PollinationsAI(AsyncGeneratorProvider, ProviderModelMixin):
                 width=width,
                 height=height,
                 seed=seed,
+                cache=cache,
                 nologo=nologo,
                 private=private,
                 enhance=enhance,
@@ -165,11 +190,14 @@ class PollinationsAI(AsyncGeneratorProvider, ProviderModelMixin):
         width: int,
         height: int,
         seed: Optional[int],
+        cache: bool,
         nologo: bool,
         private: bool,
         enhance: bool,
         safe: bool
     ) -> AsyncResult:
+        if not cache and seed is None:
+            seed = random.randint(9999, 99999999)
         params = {
             "seed": str(seed) if seed is not None else None,
             "width": str(width),
@@ -182,9 +210,10 @@ class PollinationsAI(AsyncGeneratorProvider, ProviderModelMixin):
         }
         params = {k: v for k, v in params.items() if v is not None}
         query = "&".join(f"{k}={quote_plus(v)}" for k, v in params.items())
-        url = f"{cls.image_api_endpoint}prompt/{quote_plus(prompt)}?{query}"
+        prefix = f"{model}_{seed}" if seed is not None else model
+        url = f"{cls.image_api_endpoint}prompt/{prefix}_{quote_plus(prompt)}?{query}"
         yield ImagePreview(url, prompt)
-        
+
         async with ClientSession(headers=DEFAULT_HEADERS, connector=get_connector(proxy=proxy)) as session:
             async with session.get(url, allow_redirects=True) as response:
                 await raise_for_status(response)
@@ -206,6 +235,8 @@ class PollinationsAI(AsyncGeneratorProvider, ProviderModelMixin):
         seed: Optional[int],
         cache: bool
     ) -> AsyncResult:
+        if not cache and seed is None:
+            seed = random.randint(9999, 99999999)
         json_mode = False
         if response_format and response_format.get("type") == "json_object":
             json_mode = True
