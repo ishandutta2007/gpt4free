@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 import re
-import time
+import random
 from datetime import datetime, timezone, timedelta
 import urllib.parse
 
@@ -71,33 +71,29 @@ class Janus_Pro_7B(AsyncGeneratorProvider, ProviderModelMixin):
         prompt: str = None,
         proxy: str = None,
         cookies: Cookies = None,
-        zerogpu_token: str = None,
+        api_key: str = None,
         zerogpu_uuid: str = "[object Object]",
         return_conversation: bool = False,
         conversation: JsonConversation = None,
         seed: int = None,
         **kwargs
     ) -> AsyncResult:
-        def generate_session_hash():
-            """Generate a unique session hash."""
-            return str(uuid.uuid4()).replace('-', '')[:12]
-
         method = "post"
         if model == cls.default_image_model or prompt is not None:
             method = "image"
         prompt = format_prompt(messages) if prompt is None and conversation is None else prompt
         prompt = format_image_prompt(messages, prompt)
         if seed is None:
-            seed = int(time.time())
+            seed = random.randint(1000, 999999)
 
-        session_hash = generate_session_hash() if conversation is None else getattr(conversation, "session_hash")
+        session_hash = uuid.uuid4().hex if conversation is None else getattr(conversation, "session_hash", uuid.uuid4().hex)
         async with StreamSession(proxy=proxy, impersonate="chrome") as session:
-            session_hash = generate_session_hash() if conversation is None else getattr(conversation, "session_hash")
-            if zerogpu_token is None:
-                zerogpu_uuid, zerogpu_token = await get_zerogpu_token(cls.space, session, conversation, cookies)
+            if api_key is None:
+                zerogpu_uuid, api_key = await get_zerogpu_token(cls.space, session, conversation, cookies)
             if conversation is None or not hasattr(conversation, "session_hash"):
-                conversation = JsonConversation(session_hash=session_hash, zerogpu_token=zerogpu_token, zerogpu_uuid=zerogpu_uuid)
-            conversation.zerogpu_token = zerogpu_token
+                conversation = JsonConversation(session_hash=session_hash, zerogpu_token=api_key, zerogpu_uuid=zerogpu_uuid)
+            else:
+                conversation.zerogpu_token = api_key
             if return_conversation:
                 yield conversation
 
