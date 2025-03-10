@@ -101,10 +101,13 @@
             border: none;
         }
 
-        #background {
+        #background, #image-feed {
             height: 100%;
             position: absolute;
             z-index: -1;
+            object-fit: contain;
+            width: 100%;
+            background: black;
         }
 
         .description, form p a {
@@ -181,13 +184,11 @@
     <script>
         (async () => {
             const isIframe = window.self !== window.top;
+            const backendUrl = "{{backend_url}}";
             let url = new URL(window.location.href)
-            let params = new URLSearchParams(url.search);
-            if (params.get("__sign")) {
-                localStorage.setItem("zerogpu_token", params.get("__sign"));
-                if (!isIframe) {
-                    window.location.replace("/");
-                }
+            if (isIframe && backendUrl) {
+                window.location.replace(`${backendUrl}${url.search}`);
+                return;
             }
         })();
     </script>
@@ -195,14 +196,14 @@
     <script type="importmap">
         {
             "imports": {
-                "@huggingface/hub": "https://cdn.jsdelivr.net/npm/@huggingface/hub@0.21.0/+esm",
-                "@huggingface/space-header": "https://cdn.jsdelivr.net/npm/@huggingface/space-header/+esm"
+                "@huggingface/hub": "https://cdn.jsdelivr.net/npm/@huggingface/hub@0.21.0/+esm"
             }
         }
     </script>
 </head>
 <body>
     <iframe id="background"></iframe>
+    <img id="image-feed" class="hidden" alt="Image Feed">
 
     <!-- Gradient Background Circle -->
     <div class="gradient"></div>
@@ -221,23 +222,23 @@
         <form action="/chat/">
             <input type="text" name="token" class="input-field" placeholder="Enter an Access Token..." autocomplete="off">
             <div class="button-container">
-                <a href="" class="button hidden" target="_blank">New Window</a>
+                <a id="new_window" href="" class="button hidden" target="_blank">New Window</a>
                 <button class="button">Submit</button>
             </div>
             <p>
                 <a href="https://huggingface.co/settings/tokens" target="_blank">Get Access Token</a>
             </p>
+            <img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/sign-in-with-huggingface-xl-dark.svg" alt="Sign in with Hugging Face" style="cursor: pointer; display: none;" id="signin">
+            <button id="signout" style="display: none">Sign out</button>
         </form>
         <script type="module">
             import * as hub from "@huggingface/hub";
-            import { init } from "@huggingface/space-header";
+            import { oauthLoginUrl, oauthHandleRedirectIfPresent } from "@huggingface/hub";
 
             const isIframe = window.self !== window.top;
             const button = document.querySelector('form a.button');
             if (isIframe) {
                 button.classList.remove('hidden');
-            } else {
-                init("roxky/g4f-space");
             }
 
             const form = document.querySelector("form");
@@ -253,10 +254,14 @@
                 } catch(e) {
                     console.log(e);
                     input.setCustomValidity("Invalid Access Token.");
+                    localStorage.removeItem("HuggingFace-api_key");
+                    if (localStorage.getItem("oauth")) {
+                        localStorage.removeItem("oauth");
+                        window.location.replace("/");
+                    }
                     return;
                 }
                 localStorage.setItem("HuggingFace-api_key", accessToken);
-                localStorage.setItem("HuggingFace-user", JSON.stringify(user));
                 localStorage.setItem("user", user.name);
                 localStorage.setItem("report_error", "true")
                 location.href = "/chat/";
@@ -267,6 +272,36 @@
                 event.preventDefault();
                 check_access_token();
             });
+
+            let oauthResult = localStorage.getItem("oauth");
+            if (oauthResult) {
+                try {
+                    oauthResult = JSON.parse(oauthResult);
+                } catch {
+                    oauthResult = null;
+                }
+            }
+            oauthResult ||= await oauthHandleRedirectIfPresent();
+            if (oauthResult) {
+                localStorage.setItem("oauth", JSON.stringify(oauthResult));
+                localStorage.setItem("HuggingFace-api_key", oauthResult.accessToken);
+                localStorage.setItem("user", oauthResult.userInfo.fullname);
+                document.getElementById("signout").style.removeProperty("display");
+                document.getElementById("signout").onclick = async function() {
+                    localStorage.removeItem("oauth");
+                    localStorage.removeItem("HuggingFace-api_key");
+                    window.location.replace("/");
+                }
+            } else {
+                localStorage.removeItem("oauth");
+                document.getElementById("signin").style.removeProperty("display");
+                document.getElementById("signin").onclick = async function() {
+                    window.location.href = (await oauthLoginUrl({
+                        clientId: 'ed074164-4f8d-4fb2-8bec-44952707965e',
+                        scopes: ['inference-api']
+                    }));
+                }
+            }
         </script>
 
         <!-- Footer -->
@@ -278,23 +313,56 @@
     <script>
         (async () => {
             const today = new Date().toJSON().slice(0, 10);
-            const max = 5;
+            const max = 6;
             const cache_id = Math.floor(Math.random() * max);
             let prompt;
             if (cache_id % 2 == 0) {
-                prompt = `
-                Today is ${new Date().toJSON().slice(0, 10)}.
+                prompt = `Today is ${new Date().toJSON().slice(0, 10)}.
                 Create a single-page HTML screensaver reflecting the current season (based on the date).
                 Avoid using any text.`;
             } else {
                 prompt = `Create a single-page HTML screensaver. Avoid using any text.`;
-                const response = await fetch(`/backend-api/v2/create?prompt=${prompt}&filter_markdown=html&cache=${cache_id}`);
             }
             const response = await fetch(`/backend-api/v2/create?prompt=${prompt}&filter_markdown=html&cache=${cache_id}`);
             const text = await response.text()
             background.src = `data:text/html;charset=utf-8,${encodeURIComponent(text)}`;
             const gradient = document.querySelector('.gradient');
             gradient.classList.add('hidden');
+
+            const url = "https://image.pollinations.ai/feed";
+            const eventSource = new EventSource(url);
+            const imageFeed = document.getElementById("image-feed");
+            const images = []
+            eventSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.nsfw || !data.nologo || data.width < 1024 || !data.imageURL || data.isChild) {
+                    return;
+                }
+                const lower = data.prompt.toLowerCase();
+                const tags = ["nsfw", "timeline", "blood", "soap", "orally", "heel", "latex", "bathroom", "boobs", "charts", " text ", "gel", "logo", "infographic", "warts", " bra ", "prostitute", "curvy", "breasts", "written", "bodies", "naked", "classroom", "malone", "dirty", "shoes", "shower", "banner", "fat", "nipples", "couple", "sexual", "sandal", "supplier", "overlord", "succubus", "platinum", "cracy", "crazy", "lamic", "ropes", "cables", "wires", "dirty", "messy", "cluttered", "chaotic", "disorganized", "disorderly", "untidy", "unorganized", "unorderly", "unsystematic", "disarranged", "disarrayed", "disheveled", "disordered", "jumbled", "muddled", "scattered", "shambolic", "sloppy", "unkept", "unruly"];
+                for (i in tags) {
+                    if (lower.indexOf(tags[i]) != -1) {
+                        console.log("Skipping image with tag: " + tags[i]);
+                        console.debug("Skipping image:", data.imageURL);
+                        return;
+                    }
+                }
+                images.push(data.imageURL);
+            };
+            eventSource.onerror = (event) => {
+                eventSource.close();
+            }
+            imageFeed.onerror = () => {
+                imageFeed.classList.add("hidden");
+            }   
+            setInterval(() => {
+                if (images.length > 0) {
+                    imageFeed.classList.remove("hidden");
+                    imageFeed.src = images.shift();
+                } else if(imageFeed) {
+                    imageFeed.remove();
+                }
+            }, 7000);
         })();
     </script>
 </body>

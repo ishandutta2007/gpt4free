@@ -12,13 +12,13 @@ from typing import Union, AsyncIterator, Iterator, Awaitable, Optional
 from ..image.copy_images import copy_images
 from ..typing import Messages, ImageType
 from ..providers.types import ProviderType, BaseRetryProvider
-from ..providers.response import ResponseType, ImageResponse, FinishReason, BaseConversation, SynthesizeData, ToolCalls, Usage
+from ..providers.response import *
 from ..errors import NoImageResponseError
 from ..providers.retry_provider import IterListProvider
 from ..providers.asyncio import to_sync_generator
 from ..Provider.needs_auth import BingCreateImages, OpenaiAccount
 from ..tools.run_tools import async_iter_run_tools, iter_run_tools
-from .stubs import ChatCompletion, ChatCompletionChunk, Image, ImagesResponse
+from .stubs import ChatCompletion, ChatCompletionChunk, Image, ImagesResponse, UsageModel, ToolCallModel
 from .image_models import ImageModels
 from .types import IterResponse, ImageProvider, Client as BaseClient
 from .service import get_model_and_provider, convert_to_provider
@@ -49,6 +49,7 @@ def iter_response(
     finish_reason = None
     tool_calls = None
     usage = None
+    provider: ProviderInfo = None
     completion_id = ''.join(random.choices(string.ascii_letters + string.digits, k=28))
     idx = 0
 
@@ -65,10 +66,13 @@ def iter_response(
         elif isinstance(chunk, Usage):
             usage = chunk
             continue
+        elif isinstance(chunk, ProviderInfo):
+            provider = chunk
+            continue
         elif isinstance(chunk, BaseConversation):
             yield chunk
             continue
-        elif isinstance(chunk, SynthesizeData) or not chunk:
+        elif isinstance(chunk, HiddenResponse):
             continue
         elif isinstance(chunk, Exception):
             continue
@@ -76,7 +80,6 @@ def iter_response(
         if isinstance(chunk, list):
             chunk = "".join(map(str, chunk))
         else:
-
             temp = chunk.__str__()
             if not isinstance(temp, str):
                 if isinstance(temp, list):
@@ -84,6 +87,8 @@ def iter_response(
                 else:
                     temp = repr(chunk)
             chunk = temp
+        if not chunk:
+            continue
             
         content += chunk
 
@@ -96,38 +101,49 @@ def iter_response(
             finish_reason = "stop"
 
         if stream:
-            yield ChatCompletionChunk.model_construct(chunk, None, completion_id, int(time.time()))
+            chunk = ChatCompletionChunk.model_construct(chunk, None, completion_id, int(time.time()))
+            if provider is not None:
+                chunk.provider = provider.name
+                chunk.model = provider.model
+            yield chunk
 
         if finish_reason is not None:
             break
 
         idx += 1
+
     if usage is None:
-        usage = Usage(prompt_tokens=0, completion_tokens=idx, total_tokens=idx)
+        usage = UsageModel.model_construct(completion_tokens=idx, total_tokens=idx)
+    else:
+        usage = UsageModel.model_construct(**usage.get_dict())
 
     finish_reason = "stop" if finish_reason is None else finish_reason
 
     if stream:
-        yield ChatCompletionChunk.model_construct(
-            None, finish_reason, completion_id, int(time.time()),
-            usage=usage.get_dict()
+        chat_completion = ChatCompletionChunk.model_construct(
+            None, finish_reason, completion_id, int(time.time()), usage=usage
         )
     else:
         if response_format is not None and "type" in response_format:
             if response_format["type"] == "json_object":
                 content = filter_json(content)
-        yield ChatCompletion.model_construct(
-            content, finish_reason, completion_id, int(time.time()),
-            usage=usage.get_dict(), **filter_none(tool_calls=tool_calls)
+        chat_completion = ChatCompletion.model_construct(
+            content, finish_reason, completion_id, int(time.time()), usage=usage,
+            **filter_none(tool_calls=[ToolCallModel.model_construct(**tool_call) for tool_call in tool_calls]) if tool_calls is not None else {}
         )
+    if provider is not None:
+        chat_completion.provider = provider.name
+        chat_completion.model = provider.model
+    yield chat_completion
 
 # Synchronous iter_append_model_and_provider function
 def iter_append_model_and_provider(response: ChatCompletionResponseType, last_model: str, last_provider: ProviderType) -> ChatCompletionResponseType:
     if isinstance(last_provider, BaseRetryProvider):
-        last_provider = last_provider.last_provider
+        yield from response
+        return
     for chunk in response:
         if isinstance(chunk, (ChatCompletion, ChatCompletionChunk)):
-            if last_provider is not None:
+            if chunk.provider is None and last_provider is not None:
                 chunk.model = getattr(last_provider, "last_model", last_model)
                 chunk.provider = last_provider.__name__
         yield chunk
@@ -145,6 +161,7 @@ async def async_iter_response(
     idx = 0
     tool_calls = None
     usage = None
+    provider: ProviderInfo = None
 
     try:
         async for chunk in response:
@@ -160,12 +177,17 @@ async def async_iter_response(
             elif isinstance(chunk, Usage):
                 usage = chunk
                 continue
-            elif isinstance(chunk, SynthesizeData) or not chunk:
+            elif isinstance(chunk, ProviderInfo):
+                provider = chunk
+                continue
+            elif isinstance(chunk, HiddenResponse):
                 continue
             elif isinstance(chunk, Exception):
                 continue
 
             chunk = str(chunk)
+            if not chunk:
+                continue
             content += chunk
             idx += 1
 
@@ -178,7 +200,11 @@ async def async_iter_response(
                 finish_reason = "stop"
 
             if stream:
-                yield ChatCompletionChunk.model_construct(chunk, None, completion_id, int(time.time()))
+                chunk = ChatCompletionChunk.model_construct(chunk, None, completion_id, int(time.time()))
+                if provider is not None:
+                    chunk.provider = provider.name
+                    chunk.model = provider.model
+                yield chunk
 
             if finish_reason is not None:
                 break
@@ -186,21 +212,28 @@ async def async_iter_response(
         finish_reason = "stop" if finish_reason is None else finish_reason
 
         if usage is None:
-            usage = Usage(prompt_tokens=0, completion_tokens=idx, total_tokens=idx)
+            usage = UsageModel.model_construct(completion_tokens=idx, total_tokens=idx)
+        else:
+            usage = UsageModel.model_construct(**usage.get_dict())
 
         if stream:
-            yield ChatCompletionChunk.model_construct(
-                None, finish_reason, completion_id, int(time.time()),
-                usage=usage.get_dict()
+            chat_completion = ChatCompletionChunk.model_construct(
+                None, finish_reason, completion_id, int(time.time()), usage=usage
             )
         else:
             if response_format is not None and "type" in response_format:
                 if response_format["type"] == "json_object":
                     content = filter_json(content)
-            yield ChatCompletion.model_construct(
-                content, finish_reason, completion_id, int(time.time()),
-                usage=usage.get_dict(), **filter_none(tool_calls=tool_calls)
+            chat_completion = ChatCompletion.model_construct(
+                content, finish_reason, completion_id, int(time.time()), usage=usage,
+                **filter_none(
+                    tool_calls=[ToolCallModel.model_construct(**tool_call) for tool_call in tool_calls]
+                ) if tool_calls is not None else {}
             )
+        if provider is not None:
+            chat_completion.provider = provider.name
+            chat_completion.model = provider.model
+        yield chat_completion
     finally:
         await safe_aclose(response)
 
@@ -212,11 +245,12 @@ async def async_iter_append_model_and_provider(
     last_provider = None
     try:
         if isinstance(last_provider, BaseRetryProvider):
-            if last_provider is not None:
-                last_provider = last_provider.last_provider
+            async for chunk in response:
+                yield chunk
+            return
         async for chunk in response:
             if isinstance(chunk, (ChatCompletion, ChatCompletionChunk)):
-                if last_provider is not None:
+                if chunk.provider is None and last_provider is not None:
                     chunk.model = getattr(last_provider, "last_model", last_model)
                     chunk.provider = last_provider.__name__
             yield chunk
@@ -256,6 +290,8 @@ class Completions:
         ignore_stream: Optional[bool] = False,
         **kwargs
     ) -> ChatCompletion:
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
         if image is not None:
             kwargs["images"] = [(image, image_name)]
         model, provider = get_model_and_provider(
@@ -272,8 +308,8 @@ class Completions:
 
         response = iter_run_tools(
             provider.get_create_function(),
-            model,
-            messages,
+            model=model,
+            messages=messages,
             stream=stream,
             **filter_none(
                 proxy=self.client.proxy if proxy is None else proxy,
@@ -363,7 +399,7 @@ class Images:
                         break
                 except Exception as e:
                     error = e
-                    debug.log(f"Image provider {provider.__name__}: {e}")
+                    debug.error(f"{provider.__name__} {type(e).__name__}: {e}")
         else:
             response = await self._generate_image_response(provider_handler, provider_name, model, prompt, **kwargs)
 
@@ -458,7 +494,7 @@ class Images:
                         break
                 except Exception as e:
                     error = e
-                    debug.log(f"Image provider {provider.__name__}: {e}")
+                    debug.error(f"{provider.__name__} {type(e).__name__}: {e}")
         else:
             response = await self._generate_image_response(provider_handler, provider_name, model, prompt, **kwargs)
 
@@ -542,6 +578,8 @@ class AsyncCompletions:
         ignore_stream: Optional[bool] = False,
         **kwargs
     ) -> Awaitable[ChatCompletion]:
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
         if image is not None:
             kwargs["images"] = [(image, image_name)]
         model, provider = get_model_and_provider(
@@ -558,8 +596,8 @@ class AsyncCompletions:
             
         response = async_iter_run_tools(
             provider,
-            model,
-            messages,
+            model=model,
+            messages=messages,
             stream=stream,
             **filter_none(
                 proxy=self.client.proxy if proxy is None else proxy,
@@ -583,7 +621,7 @@ class AsyncCompletions:
         messages: Messages,
         model: str,
         **kwargs
-    ) -> AsyncIterator[ChatCompletionChunk, BaseConversation]:
+    ) -> AsyncIterator[ChatCompletionChunk]:
         return self.create(messages, model, stream=True, **kwargs)
 
 class AsyncImages(Images):

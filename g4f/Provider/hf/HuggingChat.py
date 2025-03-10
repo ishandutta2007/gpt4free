@@ -8,7 +8,8 @@ import base64
 from typing import AsyncIterator
 
 try:
-    from curl_cffi.requests import Session, CurlMime
+    from curl_cffi.requests import Session
+    from curl_cffi import CurlMime
     has_curl_cffi = True
 except ImportError:
     has_curl_cffi = False
@@ -22,7 +23,7 @@ from ...requests import get_args_from_nodriver, DEFAULT_HEADERS
 from ...requests.raise_for_status import raise_for_status
 from ...providers.response import JsonConversation, ImageResponse, Sources, TitleGeneration, Reasoning, RequestLogin
 from ...cookies import get_cookies
-from .models import default_model, fallback_models, image_models, model_aliases
+from .models import default_model, fallback_models, image_models, model_aliases, llama_models
 from ... import debug
 
 class Conversation(JsonConversation):
@@ -39,14 +40,15 @@ class HuggingChat(AsyncAuthedProvider, ProviderModelMixin):
     default_model = default_model
     model_aliases = model_aliases
     image_models = image_models
+    text_models = fallback_models
 
     @classmethod
     def get_models(cls):
         if not cls.models:
             try:
                 text = requests.get(cls.url).text
-                text = re.sub(r',parameters:{[^}]+?}', '', text)
                 text = re.search(r'models:(\[.+?\]),oldModels:', text).group(1)
+                text = re.sub(r',parameters:{[^}]+?}', '', text)
                 text = text.replace('void 0', 'null')
                 def add_quotation_mark(match):
                     return f'{match.group(1)}"{match.group(2)}":'
@@ -56,7 +58,7 @@ class HuggingChat(AsyncAuthedProvider, ProviderModelMixin):
                 cls.models = cls.text_models + cls.image_models
                 cls.vision_models = [model["id"] for model in models if model["multimodal"]]
             except Exception as e:
-                debug.log(f"HuggingChat: Error reading models: {type(e).__name__}: {e}")
+                debug.error(f"{cls.__name__}: Error reading models: {type(e).__name__}: {e}")
                 cls.models = [*fallback_models]
         return cls.models
 
@@ -95,6 +97,8 @@ class HuggingChat(AsyncAuthedProvider, ProviderModelMixin):
     ) -> AsyncResult:
         if not has_curl_cffi:
             raise MissingRequirementsError('Install "curl_cffi" package | pip install -U curl_cffi')
+        if model == llama_models["name"]:
+            model = llama_models["text"] if images is None else llama_models["vision"]
         model = cls.get_model(model)
 
         session = Session(**auth_result.get_dict())

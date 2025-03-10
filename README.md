@@ -30,6 +30,8 @@ docker pull hlohaus789/g4f
 
 ## 🆕 What's New
 
+![1000032415](https://github.com/user-attachments/assets/4caab977-eb05-48ed-b750-3ad082bcfcae)
+
 - **Explore the latest features and updates**  
   Find comprehensive details on our [Releases Page](https://github.com/xtekky/gpt4free/releases).  
 
@@ -47,14 +49,14 @@ docker pull hlohaus789/g4f
 Is your site on this repository and you want to take it down? Send an email to takedown@g4f.ai with proof it is yours and it will be removed as fast as possible. To prevent reproduction please secure your API. 😉
 
 ## 🚀 GPT4Free on HuggingFace
-[![HuggingSpace](https://github.com/user-attachments/assets/1d859e8a-d6fa-416f-a213-ccc26aa11e90)](https://huggingface.co/spaces/roxky/g4f-space)
+[![HuggingSpace](https://github.com/user-attachments/assets/1d859e8a-d6fa-416f-a213-ccc26aa11e90)](https://huggingface.co/spaces/roxky/g4f-new)
 **Is a proof-of-concept API package for multi-provider AI requests. It showcases features such as:**
 
 - Load balancing and request flow control.
 - Seamless integration with multiple AI providers.
 - Comprehensive text and image generation support.
 
-> Explore the [Visit GPT4Free on HuggingFace Space](https://huggingface.co/spaces/roxky/g4f-space) for a hosted version or [Duplicate GPT4Free Space](https://huggingface.co/spaces/roxky/g4f-space?duplicate=true) it for personal use.
+> Explore the [Visit GPT4Free on HuggingFace Space](https://huggingface.co/spaces/roxky/g4f-new) for a hosted version or [Duplicate GPT4Free Space](https://huggingface.co/spaces/roxky/g4f-new?duplicate=true) it for personal use.
 
 ---
 
@@ -244,6 +246,7 @@ Run the Web UI on your smartphone for easy access on the go. Check out the dedic
    - **AsyncClient API from G4F:** [/docs/async_client](docs/async_client.md)
    - **Requests API from G4F:** [/docs/requests](docs/requests.md)
    - **File API from G4F:** [/docs/file](docs/file.md)
+   - **PydanticAI and LangChain Integration for G4F:** [/docs/pydantic_ai](docs/pydantic_ai.md)
    - **Legacy API with python modules:** [/docs/legacy](docs/legacy.md)
       
 ---
@@ -835,6 +838,7 @@ A list of all contributors is available [here](https://github.com/xtekky/gpt4fre
 - The [`Gemini.py`](https://github.com/xtekky/gpt4free/blob/main/g4f/Provider/needs_auth/Gemini.py) has input from [dsdanielpark/Gemini-API](https://github.com/dsdanielpark/Gemini-API)
 - The [`MetaAI.py`](https://github.com/xtekky/gpt4free/blob/main/g4f/Provider/MetaAI.py) file contains code from [meta-ai-api](https://github.com/Strvm/meta-ai-api) by [@Strvm](https://github.com/Strvm)
 - The [`proofofwork.py`](https://github.com/xtekky/gpt4free/blob/main/g4f/Provider/openai/proofofwork.py) has input from [missuo/FreeGPT35](https://github.com/missuo/FreeGPT35)
+- The [`Gemini.py`](https://github.com/xtekky/gpt4free/blob/main/g4f/Provider/needs_auth/Gemini.py) has input from [HanaokaYuzu/Gemini-API](https://github.com/HanaokaYuzu/Gemini-API)
 
 _Having input implies that the AI's code generation utilized it as one of many sources._
 

@@ -10,12 +10,12 @@ from .needs_auth       import *
 from .not_working      import *
 from .local            import *
 from .hf               import HuggingFace, HuggingChat, HuggingFaceAPI, HuggingFaceInference
-from .hf_space         import HuggingSpace
+from .hf_space         import *
 from .mini_max         import HailuoAI, MiniMax
 from .template         import OpenaiTemplate, BackendApi
 
+from .AllenAI              import AllenAI
 from .Blackbox             import Blackbox
-from .BlackboxAPI          import BlackboxAPI
 from .ChatGLM              import ChatGLM
 from .ChatGpt              import ChatGpt
 from .ChatGptEs            import ChatGptEs
@@ -30,14 +30,12 @@ from .Glider               import Glider
 from .ImageLabs            import ImageLabs
 from .Jmuz                 import Jmuz
 from .Liaobots             import Liaobots
-from .Mhystical            import Mhystical
 from .OIVSCode             import OIVSCode
 from .PerplexityLabs       import PerplexityLabs
 from .Pi                   import Pi
 from .Pizzagpt             import Pizzagpt
 from .PollinationsAI       import PollinationsAI
 from .PollinationsImage    import PollinationsImage
-from .Prodia               import Prodia
 from .TeachAnything        import TeachAnything
 from .You                  import You
 from .Yqcloud              import Yqcloud
@@ -53,7 +51,6 @@ __providers__: list[ProviderType] = [
     if isinstance(provider, type)
     and issubclass(provider, BaseProvider)
 ]
-__providers__ = __providers__ + HuggingSpace.providers
 __all__: list[str] = [
     provider.__name__ for provider in __providers__
 ]

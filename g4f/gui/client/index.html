@@ -33,59 +33,29 @@
         };
     </script>
     <script id="MathJax-script" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/mistral-tokenizer-js" async>
-        import mistralTokenizer from "mistral-tokenizer-js"
+    <script>
+        var tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        var firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
     </script>
-    <script type="module" src="https://cdn.jsdelivr.net/gh/belladoreai/llama-tokenizer-js@master/llama-tokenizer.js" async>
-        import llamaTokenizer from "llama-tokenizer-js"
+    <template>
+        <script type="module" src="https://cdn.jsdelivr.net/npm/mistral-tokenizer-js" async>
+            import mistralTokenizer from "mistral-tokenizer-js"
+        </script>
+        <script type="module" src="https://cdn.jsdelivr.net/gh/belladoreai/llama-tokenizer-js@master/llama-tokenizer.js" async>
+            import llamaTokenizer from "llama-tokenizer-js"
+        </script>
+        <script src="https://cdn.jsdelivr.net/npm/gpt-tokenizer/dist/cl100k_base.js" async></script>
+        <script src="https://cdn.jsdelivr.net/npm/gpt-tokenizer/dist/o200k_base.js" async></script>
+    </template>
+    <script>
+        if (localStorage.getItem("countTokens") != "false") {
+            const template = document.head.querySelector('template');
+            document.head.appendChild(template.content);
+        }
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/gpt-tokenizer/dist/cl100k_base.js" async></script>
-    <script src="https://cdn.jsdelivr.net/npm/gpt-tokenizer/dist/o200k_base.js" async></script>
-    <script type="module" async>
-        import PhotoSwipeLightbox from 'https://cdn.jsdelivr.net/npm/photoswipe/dist/photoswipe-lightbox.esm.js';
-        const lightbox = new PhotoSwipeLightbox({
-            gallery: '#messages',
-            children: 'a:has(img)',
-            secondaryZoomLevel: 2,
-            allowPanToNext: true,
-            pswpModule: () => import('https://cdn.jsdelivr.net/npm/photoswipe'),
-        });
-        lightbox.addFilter('itemData', (itemData, index) => {
-            const img = itemData.element.querySelector('img');
-            itemData.width = img.naturalWidth || 1024;
-            itemData.height = img.naturalHeight || 1024;
-            return itemData;
-        });
-        lightbox.on('uiRegister', function() {
-            lightbox.pswp.ui.registerElement({
-                name: 'custom-caption',
-                order: 9,
-                isButton: false,
-                appendTo: 'root',
-                html: 'Caption text',
-                onInit: (el, pswp) => {
-                    lightbox.pswp.on('change', () => {
-                        const currSlideElement = lightbox.pswp.currSlide.data.element;
-                        if (currSlideElement) {
-                            const img = currSlideElement.querySelector('img');
-                            const download = document.createElement("a");
-                            download.setAttribute("href", img.getAttribute('src'));
-                            let extension = img.getAttribute('src').includes(".webp") ? ".webp" : ".jpg";
-                            download.setAttribute("download", `${img.getAttribute('alt')} ${lightbox.pswp.currSlide.index}${extension}`);
-                            download.style.float = "right";
-                            download.innerHTML = '<i class="fa-solid fa-download"></i>';
-                            let span = document.createElement("span");
-                            span.innerText = img.getAttribute('alt');
-                            el.innerHTML = '';
-                            el.appendChild(download);
-                            el.appendChild(span);
-                        }
-                    });
-                }
-            });
-        });
-        lightbox.init();
-    </script>
+    <script type="module" src="/static/js/photoswipe.js" async></script>
     <script>
         const user_image = '<img src="/static/img/user.png" alt="your avatar">';
         const gpt_image = '<img src="/static/img/gpt.png" alt="your avatar">';
@@ -168,6 +138,11 @@
                 <input type="checkbox" id="report_error" checked/>
                 <label for="report_error" class="toogle" title=""></label>
             </div>
+            <div class="field">
+                <span class="label">Count words and tokens</span>
+                <input type="checkbox" id="countTokens" checked/>
+                <label for="countTokens" class="toogle" title=""></label>
+            </div>
             <div class="field box">
                 <label for="systemPrompt" class="label">System prompt</label>
                 <textarea id="systemPrompt" placeholder="You are a helpful assistant." data-example="If you need to generate images, you can use the following format: ![keywords](/generate/filename.jpg). This will enable the use of an image generation tool."></textarea>
@@ -193,7 +168,7 @@
                 <label for="mem0-api_key" class="label" title="">Mem0 API:</label>
                 <input type="text" id="mem0-api_key" name="mem0[api_key]" placeholder="api_key"/>
             </div>
-            <div class="field box">
+            <div class="field box hidden">
                 <label for="Custom-api_base" class="label" title="">Custom Provider (Base Url):</label>
                 <input type="text" id="Custom-api_base" name="Custom[api_base]" placeholder="http://localhost:8080/v1"/>
             </div>
@@ -214,6 +189,10 @@
                 <button onclick="save_storage()">
                     <i class="fa-solid fa-download"></i>
                     <a href="" onclick="return false;">Export Conversations</a>
+                </button>
+                <button onclick="save_storage(true)">
+                    <i class="fa-solid fa-pencil"></i>
+                    <a href="" onclick="return false;">Export Settings</a>
                 </button>
                 <button id="showLog">
                     <i class="fa-solid fa-terminal"></i>
@@ -237,6 +216,19 @@
             </button>
             <div class="media_player">
                 <i class="fa-regular fa-x"></i>
+            </div>
+            <div class="media-select hidden">
+                <label class="image-select" for="image" title="">
+                    <input type="file" id="image" name="image" accept="image/*" required/>
+                    <i class="fa-regular fa-image"></i>
+                </label>
+                <label class="capture-camera" for="camera">
+                    <input type="file" id="camera" name="camera" accept="image/*" capture="camera" required/>
+                    <i class="fa-solid fa-camera"></i>
+                </label>
+                <button class="close">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
             </div>
             <div class="toolbar">
                 <div id="input-count" class="">
@@ -263,13 +255,8 @@
                 <div class="box input-area">
                     <textarea id="message-input" placeholder="Ask a question" cols="30" rows="10"
                         style="white-space: pre-wrap;resize: none;"></textarea>
-                    <label class="file-label image-label" for="image" title="">
-                        <input type="file" id="image" name="image" accept="image/*" required/>
+                    <label class="file-label image-label">
                         <i class="fa-regular fa-image"></i>
-                    </label>
-                    <label class="file-label image-label" for="camera">
-                        <input type="file" id="camera" name="camera" accept="image/*" capture="camera" required/>
-                        <i class="fa-solid fa-camera"></i>
                     </label>
                     <label class="file-label" for="file">
                         <input type="file" id="file" name="file" accept=".txt, .html, .xml, .json, .js, .har, .sh, .py, .php, .css, .yaml, .sql, .log, .csv, .twig, .md, .pdf, .docx, .odt, .epub, .xlsx, .zip" required multiple/>
@@ -293,7 +280,7 @@
                 </div>
                <div class="field">
                   <select name="model" id="model">
-                     <option value="">Model: Default</option>
+                     <option value="" selected="selected">Model: Default</option>
                      <option value="gpt-4">gpt-4</option>
                      <option value="gpt-4o">gpt-4o</option>
                      <option value="gpt-4o-mini">gpt-4o-mini</option>
