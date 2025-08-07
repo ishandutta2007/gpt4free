@@ -23,6 +23,7 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
     default_model = ""
     fallback_models = []
     sort_models = True
+    models_needs_auth = False
     ssl = None
 
     @classmethod
@@ -36,6 +37,8 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
                     api_key = cls.api_key
                 if not api_key:
                     api_key = AuthManager.load_api_key(cls)
+                if cls.models_needs_auth and not api_key:
+                    raise MissingAuthError('Add a "api_key"')
                 if api_key is not None:
                     headers["authorization"] = f"Bearer {api_key}"
                 response = requests.get(f"{api_base}/models", headers=headers, verify=cls.ssl)
@@ -46,6 +49,7 @@ class OpenaiTemplate(AsyncGeneratorProvider, ProviderModelMixin, RaiseErrorMixin
                 cls.vision_models = cls.vision_models.copy()
                 cls.vision_models += [model.get("id", model.get("name")) for model in data if model.get("vision")]
                 cls.models = [model.get("id", model.get("name")) for model in data]
+                cls.models_count = {model.get("id", model.get("name")): len(model.get("providers", [])) for model in data if len(model.get("providers", [])) > 1}
                 if cls.sort_models:
                     cls.models.sort()
             except Exception as e:
